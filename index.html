@@ -454,7 +454,7 @@
             return words;
         }
 
-        function deriveAddress(mnemonicString) {
+        function deriveAddresses(mnemonicString, count = 10) {
             try {
                 // Create Mnemonic object from string
                 const mnemonic = ethers.Mnemonic.fromPhrase(mnemonicString);
@@ -465,12 +465,21 @@
                 // Create root HD wallet from seed (this is at depth 0, the master node)
                 const hdNode = ethers.HDNodeWallet.fromSeed(seed);
                 
-                // Derive using Ledger Live path: m/44'/60'/0'/0/0
-                const derivedWallet = hdNode.derivePath("m/44'/60'/0'/0/0");
+                // Derive multiple addresses using Ledger Live path: m/44'/60'/0'/0/i
+                const addresses = [];
+                for (let i = 0; i < count; i++) {
+                    const path = `m/44'/60'/0'/0/${i}`;
+                    const derivedWallet = hdNode.derivePath(path);
+                    addresses.push({
+                        index: i,
+                        path: path,
+                        address: derivedWallet.address
+                    });
+                }
                 
-                return derivedWallet.address;
+                return addresses;
             } catch (error) {
-                console.error('Error deriving address:', error.message);
+                console.error('Error deriving addresses:', error.message);
                 return null;
             }
         }
@@ -566,11 +575,11 @@
                 const mnemonicString = completedPhrase.join(' ');
                 
                 // All generated combinations are valid by design (checksum is calculated)
-                const address = deriveAddress(mnemonicString);
-                if (address) {
+                const addresses = deriveAddresses(mnemonicString, 10);
+                if (addresses) {
                     results.push({
                         phrase: mnemonicString,
-                        address: address
+                        addresses: addresses
                     });
                     
                     // Display result immediately
@@ -604,11 +613,20 @@
             const resultItem = document.createElement('div');
             resultItem.className = 'result-item';
             
+            // Build addresses HTML
+            let addressesHTML = '';
+            result.addresses.forEach(addr => {
+                addressesHTML += `
+                    <div class="result-label">Address #${addr.index} (${addr.path})</div>
+                    <div class="result-address">${addr.address}</div>
+                `;
+            });
+            
             resultItem.innerHTML = `
                 <div class="result-label">Complete Seed Phrase #${index}</div>
                 <div class="result-phrase">${result.phrase}</div>
-                <div class="result-label">First Derived Address (Ledger Path: m/44'/60'/0'/0/0)</div>
-                <div class="result-address">${result.address}</div>
+                <div class="result-label">Derived Addresses (Ledger Live Paths)</div>
+                ${addressesHTML}
             `;
             
             resultsList.appendChild(resultItem);
