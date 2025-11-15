@@ -376,26 +376,20 @@
             <div style="background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; padding: 12px; margin-bottom: 15px; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);">
                 <div style="margin-bottom: 8px;">
                     <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
-                        <input type="checkbox" id="path_ledger" value="m/44'/60'/0'/0" checked style="margin-right: 8px; cursor: pointer;">
-                        Ledger Live (m/44'/60'/0'/0/x)
+                        <input type="checkbox" id="path_bip44" value="bip44" checked style="margin-right: 8px; cursor: pointer;">
+                        BIP-44 Standard (Trezor/MEW/MetaMask) - m/44'/60'/0'/0/i
                     </label>
                 </div>
                 <div style="margin-bottom: 8px;">
                     <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
-                        <input type="checkbox" id="path_metamask" value="m/44'/60'/0'/0" style="margin-right: 8px; cursor: pointer;">
-                        MetaMask (m/44'/60'/0'/0/x)
-                    </label>
-                </div>
-                <div style="margin-bottom: 8px;">
-                    <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
-                        <input type="checkbox" id="path_trezor" value="m/44'/60'/0'" style="margin-right: 8px; cursor: pointer;">
-                        Trezor (m/44'/60'/0'/x)
+                        <input type="checkbox" id="path_ledger_legacy" value="ledger_legacy" style="margin-right: 8px; cursor: pointer;">
+                        Ledger Legacy Chrome - m/44'/60'/0'/i
                     </label>
                 </div>
                 <div>
                     <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
-                        <input type="checkbox" id="path_legacy" value="m/44'/60'/0" style="margin-right: 8px; cursor: pointer;">
-                        Legacy (m/44'/60'/0/x)
+                        <input type="checkbox" id="path_ledger_live" value="ledger_live" style="margin-right: 8px; cursor: pointer;">
+                        Ledger Live - m/44'/60'/i'/0/0
                     </label>
                 </div>
             </div>
@@ -541,20 +535,19 @@
         function getSelectedDerivationPaths() {
             const paths = [];
             const pathConfigs = [
-                { id: 'path_ledger', base: "m/44'/60'/0'/0", name: 'Ledger Live' },
-                { id: 'path_metamask', base: "m/44'/60'/0'/0", name: 'MetaMask' },
-                { id: 'path_trezor', base: "m/44'/60'/0'", name: 'Trezor' },
-                { id: 'path_legacy', base: "m/44'/60'/0", name: 'Legacy' }
+                { id: 'path_bip44', type: 'standard', base: "m/44'/60'/0'/0", name: 'BIP-44 (Trezor/MEW/MetaMask)' },
+                { id: 'path_ledger_legacy', type: 'standard', base: "m/44'/60'/0'", name: 'Ledger Legacy Chrome' },
+                { id: 'path_ledger_live', type: 'ledger_live', base: "m/44'/60'", name: 'Ledger Live' }
             ];
             
             pathConfigs.forEach(config => {
                 const checkbox = document.getElementById(config.id);
                 if (checkbox && checkbox.checked) {
-                    paths.push({ base: config.base, name: config.name });
+                    paths.push(config);
                 }
             });
             
-            return paths.length > 0 ? paths : [{ base: "m/44'/60'/0'/0", name: 'Ledger Live' }];
+            return paths.length > 0 ? paths : [{ id: 'path_bip44', type: 'standard', base: "m/44'/60'/0'/0", name: 'BIP-44 (Trezor/MEW/MetaMask)' }];
         }
 
         function deriveAddressesMultiplePaths(mnemonicString, derivationPaths, count = 10) {
@@ -573,8 +566,17 @@
                 
                 derivationPaths.forEach(pathConfig => {
                     for (let i = 0; i < count; i++) {
-                        const fullPath = `${pathConfig.base}/${i}`;
-                        const derivedWallet = hdNode.derivePath(fullPath);
+                        let fullPath, derivedWallet;
+                        
+                        if (pathConfig.type === 'ledger_live') {
+                            // Ledger Live: m/44'/60'/i'/0/0 (hardened index in the middle)
+                            fullPath = `${pathConfig.base}/${i}'/0/0`;
+                        } else {
+                            // Standard paths: m/44'/60'/0'/0/i or m/44'/60'/0'/i
+                            fullPath = `${pathConfig.base}/${i}`;
+                        }
+                        
+                        derivedWallet = hdNode.derivePath(fullPath);
                         allAddresses.push({
                             index: i,
                             pathName: pathConfig.name,
