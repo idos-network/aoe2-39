@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIP-39 Seed Recovery Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Times New Roman', 'Georgia', serif;
+            background: 
+                linear-gradient(rgba(40, 30, 20, 0.3), rgba(40, 30, 20, 0.3)),
+                repeating-linear-gradient(45deg, #4a3c2a 0px, #4a3c2a 2px, #5c4d3a 2px, #5c4d3a 4px);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: 
+                linear-gradient(rgba(235, 220, 195, 0.95), rgba(220, 205, 180, 0.95)),
+                url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e8d4b8" width="100" height="100"/><path d="M0 0 L100 100 M100 0 L0 100" stroke="%23d4c0a4" stroke-width="0.5" opacity="0.3"/></svg>');
+            border: 8px ridge #8b7355;
+            box-shadow: 
+                0 0 0 3px #3d2f1f,
+                0 0 0 6px #6b5d4f,
+                inset 0 0 20px rgba(0,0,0,0.3),
+                0 20px 60px rgba(0, 0, 0, 0.6);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+            position: relative;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 15px;
+            background: repeating-linear-gradient(90deg, #8b7355 0px, #8b7355 20px, #6b5d4f 20px, #6b5d4f 40px);
+            border-bottom: 2px solid #3d2f1f;
+        }
+
+        h1 {
+            color: #2c1810;
+            margin-bottom: 10px;
+            margin-top: 10px;
+            font-size: 32px;
+            text-align: center;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #d4a574, -1px -1px 0 #8b6f47;
+            letter-spacing: 2px;
+            font-variant: small-caps;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #5c4033;
+            margin-bottom: 30px;
+            font-size: 14px;
+            font-style: italic;
+        }
+
+        .warning {
+            background: linear-gradient(135deg, #d4a574 0%, #c89968 100%);
+            border: 4px ridge #8b6f47;
+            padding: 15px;
+            margin-bottom: 30px;
+            color: #2c1810;
+            font-weight: 600;
+            box-shadow: inset 0 1px 3px rgba(255,255,255,0.5), 0 3px 8px rgba(0,0,0,0.3);
+        }
+
+        .warning::before {
+            content: "⚔️ ";
+            font-size: 18px;
+        }
+
+        .input-section {
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #2c1810;
+            font-weight: 700;
+            font-size: 15px;
+            text-shadow: 1px 1px 0 rgba(212, 165, 116, 0.5);
+            font-variant: small-caps;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 12px;
+            background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9));
+            border: 4px inset #8b7355;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            resize: vertical;
+            color: #2c1810;
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);
+        }
+
+        textarea:focus {
+            outline: none;
+            background: linear-gradient(rgba(255, 250, 240, 0.95), rgba(250, 243, 225, 0.95));
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 15px;
+            font-weight: bold;
+            font-family: 'Times New Roman', serif;
+            border: 4px outset #8b7355;
+            background: linear-gradient(180deg, #b8956a 0%, #8b7355 50%, #6b5d4f 100%);
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.1s;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+            font-variant: small-caps;
+        }
+
+        button:hover:not(:disabled) {
+            background: linear-gradient(180deg, #c8a67a 0%, #9b8365 50%, #7b6d5f 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 5px 10px rgba(0,0,0,0.5);
+        }
+
+        button:active:not(:disabled) {
+            border-style: inset;
+            transform: translateY(1px);
+            box-shadow: inset 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #recoverBtn {
+            background: linear-gradient(180deg, #d4a574 0%, #b8956a 50%, #8b7355 100%);
+        }
+
+        #recoverBtn:hover:not(:disabled) {
+            background: linear-gradient(180deg, #e4b584 0%, #c8a57a 50%, #9b8365 100%);
+        }
+
+        #recoverBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            filter: grayscale(0.3);
+        }
+
+        #stopBtn {
+            background: linear-gradient(180deg, #a84442 0%, #8b3735 50%, #6b2725 100%);
+            display: none;
+        }
+
+        #stopBtn:hover {
+            background: linear-gradient(180deg, #b85452 0%, #9b4745 50%, #7b3735 100%);
+        }
+
+        #clearBtn {
+            background: linear-gradient(180deg, #7a6c5d 0%, #5c4d3a 50%, #4a3c2a 100%);
+        }
+
+        #clearBtn:hover {
+            background: linear-gradient(180deg, #8a7c6d 0%, #6c5d4a 50%, #5a4c3a 100%);
+        }
+
+        .info-box {
+            background: linear-gradient(135deg, rgba(212, 195, 165, 0.9), rgba(195, 178, 148, 0.9));
+            border: 4px ridge #8b7355;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #2c1810;
+            font-size: 14px;
+            display: none;
+            box-shadow: inset 0 1px 3px rgba(255,255,255,0.5), 0 3px 8px rgba(0,0,0,0.3);
+            font-weight: 500;
+        }
+
+        #progress {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar-container {
+            background: linear-gradient(180deg, #4a3c2a 0%, #3d2f1f 100%);
+            border: 4px inset #8b7355;
+            height: 35px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.5);
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #d4a574 0%, #b8956a 50%, #8b7355 100%);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            font-family: 'Times New Roman', serif;
+            border-right: 2px solid #6b5d4f;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.3);
+        }
+
+        .progress-text {
+            color: #2c1810;
+            font-size: 14px;
+            display: block;
+            font-weight: 600;
+            text-shadow: 1px 1px 0 rgba(212, 165, 116, 0.3);
+        }
+
+        #results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        #results h2 {
+            color: #2c1810;
+            margin-bottom: 20px;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 #d4a574;
+            font-variant: small-caps;
+        }
+
+        .result-count {
+            background: linear-gradient(180deg, #6b8e23 0%, #556b1f 50%, #3d4f15 100%);
+            color: #fff;
+            padding: 6px 14px;
+            border: 3px outset #8b7355;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .result-item {
+            background: linear-gradient(135deg, rgba(235, 220, 195, 0.9), rgba(220, 205, 180, 0.9));
+            border: 4px ridge #8b7355;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .result-item:hover {
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+            transform: translateY(-2px);
+        }
+
+        .result-label {
+            font-weight: 700;
+            color: #2c1810;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            font-variant: small-caps;
+            letter-spacing: 1px;
+        }
+
+        .result-phrase {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(rgba(255, 250, 240, 0.95), rgba(250, 243, 225, 0.95));
+            padding: 12px;
+            margin-bottom: 12px;
+            word-wrap: break-word;
+            font-size: 13px;
+            color: #2c1810;
+            border: 3px inset #8b7355;
+            box-shadow: inset 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .result-address {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(rgba(212, 195, 165, 0.8), rgba(195, 178, 148, 0.8));
+            padding: 12px;
+            word-wrap: break-word;
+            font-size: 13px;
+            color: #1a0f08;
+            border: 3px inset #8b7355;
+            box-shadow: inset 2px 2px 4px rgba(0,0,0,0.2);
+            font-weight: 600;
+        }
+
+        .error {
+            background: linear-gradient(135deg, #a84442 0%, #8b3735 100%);
+            border: 4px ridge #6b2725;
+            padding: 15px;
+            margin: 20px 0;
+            color: #ffe5e5;
+            font-weight: 600;
+            box-shadow: inset 0 1px 3px rgba(255,255,255,0.3), 0 3px 8px rgba(0,0,0,0.4);
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #5c4033;
+            font-size: 12px;
+            font-style: italic;
+            text-shadow: 1px 1px 0 rgba(212, 165, 116, 0.3);
+            border-top: 2px solid #8b7355;
+            padding-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 BIP-39 Seed Recovery Tool</h1>
+        <p class="subtitle">Recover missing words from your 24-word seed phrase</p>
+        
+        <div class="warning">
+            <strong>Security Warning:</strong> Only use this tool on an offline, air-gapped computer. Never enter sensitive seed phrases on an internet-connected device. Your seed phrase controls your assets!
+        </div>
+
+        <div class="info-box" id="infoBox"></div>
+        
+        <div class="input-section">
+            <label for="seedInput">Enter Your Known Seed Words:</label>
+            <textarea 
+                id="seedInput" 
+                placeholder="Enter the seed words you know, separated by spaces (e.g., abandon ability able about above absent absorb abstract)"
+                spellcheck="false"
+            ></textarea>
+            <div class="button-group">
+                <button id="recoverBtn">🔍 Recover Missing Words</button>
+                <button id="stopBtn">⏹ Stop</button>
+                <button id="clearBtn">🗑 Clear</button>
+            </div>
+        </div>
+        
+        <div id="progress">
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar">0%</div>
+            </div>
+            <span class="progress-text" id="progressText">Initializing...</span>
+        </div>
+        
+        <div id="results">
+            <h2>
+                Valid Combinations Found: 
+                <span class="result-count" id="resultCount">0</span>
+            </h2>
+            <div id="resultsList"></div>
+        </div>
+
+        <footer>
+            <p>This tool runs entirely in your browser. No data is transmitted.</p>
+            <p>Always verify recovered addresses before use.</p>
+        </footer>
+    </div>
+
+    <script>
+        const { ethers } = window;
+        let stopRequested = false;
+
+        // UI Elements
+        const seedInput = document.getElementById('seedInput');
+        const recoverBtn = document.getElementById('recoverBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const progressDiv = document.getElementById('progress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const resultsDiv = document.getElementById('results');
+        const resultsList = document.getElementById('resultsList');
+        const resultCount = document.getElementById('resultCount');
+        const infoBox = document.getElementById('infoBox');
+
+        // Event Listeners
+        recoverBtn.addEventListener('click', startRecovery);
+        stopBtn.addEventListener('click', stopRecovery);
+        clearBtn.addEventListener('click', clearAll);
+
+        // Get BIP39 wordlist from ethers v6
+        const BIP39_WORDLIST = ethers.wordlists.en;
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            
+            // Remove any existing errors
+            const existingError = document.querySelector('.error');
+            if (existingError) existingError.remove();
+            
+            seedInput.parentElement.insertBefore(errorDiv, seedInput.nextSibling);
+            
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        function showInfo(message) {
+            infoBox.textContent = message;
+            infoBox.style.display = 'block';
+        }
+
+        function parseInput(inputText) {
+            const words = inputText.trim().toLowerCase().split(/[\s,]+/).filter(w => w.length > 0);
+            
+            if (words.length === 0) {
+                throw new Error('Please enter at least one seed word.');
+            }
+
+            if (words.length >= 24) {
+                throw new Error('You cannot have 24 or more words. This tool is for recovering missing words.');
+            }
+
+            // Validate each word against BIP39 wordlist
+            const invalidWords = [];
+            words.forEach(word => {
+                if (BIP39_WORDLIST.getWordIndex(word) === -1) {
+                    invalidWords.push(word);
+                }
+            });
+
+            if (invalidWords.length > 0) {
+                throw new Error(`Invalid BIP39 words found: ${invalidWords.join(', ')}`);
+            }
+
+            return words;
+        }
+
+        function deriveAddress(mnemonicString) {
+            try {
+                // Create Mnemonic object from string
+                const mnemonic = ethers.Mnemonic.fromPhrase(mnemonicString);
+                
+                // Compute seed from mnemonic (instance method, not static)
+                const seed = mnemonic.computeSeed();
+                
+                // Create root HD wallet from seed (this is at depth 0, the master node)
+                const hdNode = ethers.HDNodeWallet.fromSeed(seed);
+                
+                // Derive using Ledger Live path: m/44'/60'/0'/0/0
+                const derivedWallet = hdNode.derivePath("m/44'/60'/0'/0/0");
+                
+                return derivedWallet.address;
+            } catch (error) {
+                console.error('Error deriving address:', error.message);
+                return null;
+            }
+        }
+
+        async function* generateCombinations(knownWords, missingCount) {
+            // For BIP-39 24-word phrases, use entropy-based generation
+            // This generates only valid combinations based on checksum constraints
+            
+            // Total bits in known words
+            const knownBits = knownWords.length * 11;
+            
+            // For 24-word phrase: 256 entropy bits + 8 checksum bits = 264 total
+            // We need to fill remaining bits, but 8 are checksum (determined by entropy)
+            const remainingBits = 264 - knownBits;
+            const entropyBitsToGenerate = remainingBits - 8; // Subtract checksum bits
+            
+            // Generate only the free entropy bits
+            const validCombinations = Math.pow(2, entropyBitsToGenerate);
+            
+            for (let i = 0; i < validCombinations; i++) {
+                // Check stop flag at the very beginning of each iteration
+                if (stopRequested) {
+                    return;
+                }
+                
+                // Convert known words to bits
+                let bits = '';
+                for (const word of knownWords) {
+                    const index = BIP39_WORDLIST.getWordIndex(word);
+                    bits += index.toString(2).padStart(11, '0');
+                }
+                
+                // Add the entropy bits we're testing
+                bits += i.toString(2).padStart(entropyBitsToGenerate, '0');
+                
+                // Extract entropy (first 256 bits)
+                const entropyBits = bits.slice(0, 256);
+                
+                // Calculate checksum from entropy
+                const entropyHex = BigInt('0b' + entropyBits).toString(16).padStart(64, '0');
+                const entropyBytes = new Uint8Array(32);
+                for (let j = 0; j < 32; j++) {
+                    entropyBytes[j] = parseInt(entropyHex.substr(j * 2, 2), 16);
+                }
+                
+                // SHA-256 hash of entropy
+                const hashBuffer = await crypto.subtle.digest('SHA-256', entropyBytes);
+                const hashArray = new Uint8Array(hashBuffer);
+                const checksumByte = hashArray[0];
+                const checksumBits = checksumByte.toString(2).padStart(8, '0');
+                
+                // Combine entropy + checksum
+                const fullBits = entropyBits + checksumBits;
+                
+                // Convert to words
+                const words = [];
+                for (let j = 0; j < 24; j++) {
+                    const wordBits = fullBits.slice(j * 11, (j + 1) * 11);
+                    const wordIndex = parseInt(wordBits, 2);
+                    words.push(BIP39_WORDLIST.getWord(wordIndex));
+                }
+                
+                // Return only the missing words
+                yield words.slice(knownWords.length);
+            }
+        }
+
+        async function recoverSeedPhrase(knownWords) {
+            const results = [];
+            const missingCount = 24 - knownWords.length;
+            
+            // Calculate valid combinations based on BIP-39 checksum properties
+            // For 24-word phrases: 256 bits entropy + 8 bits checksum
+            // Missing N words = N×11 bits, but 8 are checksum (determined by entropy)
+            // So valid combinations = 2^(N×11 - 8)
+            const entropyBits = missingCount * 11 - 8;
+            const validCombinations = Math.pow(2, entropyBits);
+            
+            showInfo(`Optimized search: Testing only ${validCombinations.toLocaleString()} valid entropy combinations for ${missingCount} missing word(s).\n` +
+                    `(Reduced from ${Math.pow(2048, missingCount).toLocaleString()} total by using checksum constraints)`);
+
+            
+            let tested = 0;
+            let lastUpdate = Date.now();
+            const batchSize = 100;
+            
+            const generator = generateCombinations(knownWords, missingCount);
+            
+            for await (const missingWords of generator) {
+                if (stopRequested) break;
+                
+                const completedPhrase = [...knownWords, ...missingWords];
+                const mnemonicString = completedPhrase.join(' ');
+                
+                // All generated combinations are valid by design (checksum is calculated)
+                const address = deriveAddress(mnemonicString);
+                if (address) {
+                    results.push({
+                        phrase: mnemonicString,
+                        address: address
+                    });
+                    
+                    // Display result immediately
+                    displayResult(results[results.length - 1], results.length);
+                }
+                
+                tested++;
+                
+                // Update progress periodically
+                const now = Date.now();
+                if (now - lastUpdate > 100 || tested % batchSize === 0) {
+                    const progress = (tested / validCombinations) * 100;
+                    updateProgress(progress, tested, validCombinations);
+                    lastUpdate = now;
+                    
+                    // Yield control to browser to keep UI responsive
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+            
+            return results;
+        }
+
+        function updateProgress(percentage, tested, total) {
+            progressBar.style.width = percentage + '%';
+            progressBar.textContent = percentage.toFixed(2) + '%';
+            progressText.textContent = `Generated ${tested.toLocaleString()} of ${total.toLocaleString()} valid phrases...`;
+        }
+
+        function displayResult(result, index) {
+            const resultItem = document.createElement('div');
+            resultItem.className = 'result-item';
+            
+            resultItem.innerHTML = `
+                <div class="result-label">Complete Seed Phrase #${index}</div>
+                <div class="result-phrase">${result.phrase}</div>
+                <div class="result-label">First Derived Address (Ledger Path: m/44'/60'/0'/0/0)</div>
+                <div class="result-address">${result.address}</div>
+            `;
+            
+            resultsList.appendChild(resultItem);
+            resultCount.textContent = index;
+            resultsDiv.style.display = 'block';
+        }
+
+        async function startRecovery() {
+            try {
+                // Clear previous results
+                resultsList.innerHTML = '';
+                resultsDiv.style.display = 'none';
+                infoBox.style.display = 'none';
+                
+                // Parse and validate input
+                const knownWords = parseInput(seedInput.value);
+                const missingCount = 24 - knownWords.length;
+                
+                // Warn about computation time
+                if (missingCount > 3) {
+                    const confirmed = confirm(
+                        `Warning: You have ${missingCount} missing words, which means ${Math.pow(2048, missingCount).toLocaleString()} combinations to test. ` +
+                        `This could take a very long time or crash your browser. Continue?`
+                    );
+                    if (!confirmed) return;
+                }
+                
+                // Update UI
+                recoverBtn.disabled = true;
+                seedInput.disabled = true;
+                stopBtn.style.display = 'block';
+                progressDiv.style.display = 'block';
+                stopRequested = false;
+                
+                // Start recovery
+                const startTime = Date.now();
+                const results = await recoverSeedPhrase(knownWords);
+                const endTime = Date.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+                
+                // Update final status
+                if (stopRequested) {
+                    progressText.textContent = `Recovery stopped by user. Found ${results.length} valid combination(s) in ${duration} seconds.`;
+                } else {
+                    progressText.textContent = `Recovery complete! Found ${results.length} valid combination(s) in ${duration} seconds.`;
+                }
+                
+                if (results.length === 0) {
+                    showError('No valid seed phrases found. Please verify your input words are correct.');
+                }
+                
+            } catch (error) {
+                showError(error.message);
+                progressDiv.style.display = 'none';
+            } finally {
+                recoverBtn.disabled = false;
+                seedInput.disabled = false;
+                stopBtn.style.display = 'none';
+            }
+        }
+
+        function stopRecovery() {
+            stopRequested = true;
+            stopBtn.disabled = true;
+            progressText.textContent = 'Stopping recovery...';
+        }
+
+        function clearAll() {
+            seedInput.value = '';
+            resultsList.innerHTML = '';
+            resultsDiv.style.display = 'none';
+            progressDiv.style.display = 'none';
+            infoBox.style.display = 'none';
+            
+            const existingError = document.querySelector('.error');
+            if (existingError) existingError.remove();
+        }
+
+        // Add example for testing
+        console.log('%c🔐 BIP-39 Seed Recovery Tool', 'font-size: 18px; font-weight: bold; color: #667eea;');
+        console.log('%cFor testing, try entering 23 words from a valid BIP-39 phrase', 'font-size: 12px; color: #666;');
+        console.log('%cExample test phrase (first 23 words):', 'font-size: 12px; color: #666;');
+        console.log('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon');
+    </script>
+</body>
+</html>
