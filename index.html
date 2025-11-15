@@ -364,13 +364,12 @@
                 spellcheck="false"
             ></textarea>
             
-            <label for="knownAddress" style="margin-top: 15px;">Known Address (Optional - stop when found):</label>
-            <input 
-                type="text" 
-                id="knownAddress" 
-                placeholder="0x... (Leave empty to find all valid combinations)"
-                style="width: 100%; padding: 10px; background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; font-family: 'Courier New', monospace; color: #2c1810; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);"
-            />
+            <label for="knownAddresses" style="margin-top: 15px;">Known Addresses (Optional - stop when found):</label>
+            <textarea 
+                id="knownAddresses" 
+                placeholder="Enter known addresses (one per line)&#10;0x1234...&#10;0x5678...&#10;&#10;Leave empty to find all valid combinations"
+                style="width: 100%; min-height: 80px; padding: 10px; background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; font-family: 'Courier New', monospace; color: #2c1810; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2); resize: vertical;"
+            ></textarea>
             
             <label style="margin-top: 15px; margin-bottom: 10px;">Derivation Paths:</label>
             <div style="background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; padding: 12px; margin-bottom: 15px; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);">
@@ -656,89 +655,270 @@
             }
         }
 
-        async function recoverSeedPhrase(knownWords) {
+        // Multi-threaded recovery using Web Workers
+        let workers = [];
+        
+        // Create worker from inline code (avoids CORS issues with file:// protocol)
+        function createWorker() {
+            const workerCode = `
+                importScripts('https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js');
+                
+                const { ethers } = globalThis;
+                const BIP39_WORDLIST = ethers.wordlists.en;
+                
+                function deriveAddressesMultiplePaths(mnemonicString, derivationPaths, count = 10) {
+                    try {
+                        const mnemonic = ethers.Mnemonic.fromPhrase(mnemonicString);
+                        const seed = mnemonic.computeSeed();
+                        const hdNode = ethers.HDNodeWallet.fromSeed(seed);
+                        
+                        const allAddresses = [];
+                        
+                        derivationPaths.forEach(pathConfig => {
+                            for (let i = 0; i < count; i++) {
+                                let fullPath;
+                                
+                                if (pathConfig.type === 'ledger_live') {
+                                    fullPath = \`\${pathConfig.base}/\${i}'/0/0\`;
+                                } else {
+                                    fullPath = \`\${pathConfig.base}/\${i}\`;
+                                }
+                                
+                                const derivedWallet = hdNode.derivePath(fullPath);
+                                allAddresses.push({
+                                    index: i,
+                                    pathName: pathConfig.name,
+                                    path: fullPath,
+                                    address: derivedWallet.address
+                                });
+                            }
+                        });
+                        
+                        return allAddresses;
+                    } catch (error) {
+                        return null;
+                    }
+                }
+                
+                async function processRange(knownWords, startIdx, endIdx, derivationPaths, knownAddresses) {
+                    const knownBits = knownWords.length * 11;
+                    const remainingBits = 264 - knownBits;
+                    const entropyBitsToGenerate = remainingBits - 8;
+                    
+                    let tested = 0;
+                    let lastProgressUpdate = Date.now();
+                    
+                    for (let i = startIdx; i < endIdx; i++) {
+                        let bits = '';
+                        for (const word of knownWords) {
+                            const index = BIP39_WORDLIST.getWordIndex(word);
+                            bits += index.toString(2).padStart(11, '0');
+                        }
+                        
+                        bits += i.toString(2).padStart(entropyBitsToGenerate, '0');
+                        const entropyBits = bits.slice(0, 256);
+                        
+                        const entropyHex = BigInt('0b' + entropyBits).toString(16).padStart(64, '0');
+                        const entropyBytes = new Uint8Array(32);
+                        for (let j = 0; j < 32; j++) {
+                            entropyBytes[j] = parseInt(entropyHex.substr(j * 2, 2), 16);
+                        }
+                        
+                        const hashBuffer = await crypto.subtle.digest('SHA-256', entropyBytes);
+                        const hashArray = new Uint8Array(hashBuffer);
+                        const checksumByte = hashArray[0];
+                        const checksumBits = checksumByte.toString(2).padStart(8, '0');
+                        
+                        const fullBits = entropyBits + checksumBits;
+                        
+                        const words = [];
+                        for (let j = 0; j < 24; j++) {
+                            const wordBits = fullBits.slice(j * 11, (j + 1) * 11);
+                            const wordIndex = parseInt(wordBits, 2);
+                            words.push(BIP39_WORDLIST.getWord(wordIndex));
+                        }
+                        
+                        const mnemonicString = words.join(' ');
+                        const addresses = deriveAddressesMultiplePaths(mnemonicString, derivationPaths, 10);
+                        
+                        if (addresses) {
+                            if (knownAddresses.length > 0) {
+                                const matchedAddress = addresses.find(addr => 
+                                    knownAddresses.includes(addr.address.toLowerCase())
+                                );
+                                
+                                if (matchedAddress) {
+                                    postMessage({
+                                        type: 'match',
+                                        data: {
+                                            phrase: mnemonicString,
+                                            addresses: addresses,
+                                            matchedAddress: matchedAddress
+                                        }
+                                    });
+                                    return;
+                                }
+                            } else {
+                                postMessage({
+                                    type: 'result',
+                                    data: {
+                                        phrase: mnemonicString,
+                                        addresses: addresses
+                                    }
+                                });
+                            }
+                        }
+                        
+                        tested++;
+                        
+                        const now = Date.now();
+                        if (now - lastProgressUpdate > 200) {
+                            postMessage({
+                                type: 'progress',
+                                tested: tested
+                            });
+                            lastProgressUpdate = now;
+                        }
+                    }
+                    
+                    postMessage({
+                        type: 'complete',
+                        tested: tested
+                    });
+                }
+                
+                self.onmessage = async function(e) {
+                    const { knownWords, startIdx, endIdx, derivationPaths, knownAddresses } = e.data;
+                    
+                    try {
+                        await processRange(knownWords, startIdx, endIdx, derivationPaths, knownAddresses);
+                    } catch (error) {
+                        postMessage({
+                            type: 'error',
+                            error: error.message
+                        });
+                    }
+                };
+            `;
+            
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            return new Worker(URL.createObjectURL(blob));
+        }
+        
+        async function recoverSeedPhraseParallel(knownWords) {
             const results = [];
             const missingCount = 24 - knownWords.length;
             
-            // Get selected derivation paths and known address
+            // Get selected derivation paths and known addresses
             const derivationPaths = getSelectedDerivationPaths();
-            const knownAddressInput = document.getElementById('knownAddress').value.trim().toLowerCase();
-            const knownAddress = knownAddressInput ? knownAddressInput : null;
+            const knownAddressesInput = document.getElementById('knownAddresses').value.trim();
             
-            // Calculate valid combinations based on BIP-39 checksum properties
-            // For 24-word phrases: 256 bits entropy + 8 bits checksum
-            // Missing N words = N×11 bits, but 8 are checksum (determined by entropy)
-            // So valid combinations = 2^(N×11 - 8)
+            // Parse multiple addresses (one per line or comma-separated)
+            const knownAddresses = knownAddressesInput
+                ? knownAddressesInput
+                    .split(/[\n,]+/)
+                    .map(addr => addr.trim().toLowerCase())
+                    .filter(addr => addr.length > 0)
+                : [];
+            
+            // Calculate valid combinations
             const entropyBits = missingCount * 11 - 8;
             const validCombinations = Math.pow(2, entropyBits);
             
-            let infoText = `Optimized search: Testing only ${validCombinations.toLocaleString()} valid entropy combinations for ${missingCount} missing word(s).\n` +
+            // Detect number of CPU cores (use navigator.hardwareConcurrency)
+            const numWorkers = navigator.hardwareConcurrency || 4;
+            
+            let infoText = `⚡ Multi-threaded search using ${numWorkers} CPU cores!\n` +
+                    `Testing ${validCombinations.toLocaleString()} valid entropy combinations for ${missingCount} missing word(s).\n` +
                     `(Reduced from ${Math.pow(2048, missingCount).toLocaleString()} total by using checksum constraints)\n` +
                     `Checking ${derivationPaths.length} derivation path(s): ${derivationPaths.map(p => p.name).join(', ')}`;
             
-            if (knownAddress) {
-                infoText += `\n🎯 Searching for known address: ${knownAddress}`;
+            if (knownAddresses.length > 0) {
+                infoText += `\n🎯 Searching for ${knownAddresses.length} known address${knownAddresses.length > 1 ? 'es' : ''}:\n` + 
+                    knownAddresses.map(addr => `   ${addr}`).join('\n');
             }
             
             showInfo(infoText);
             
-            let tested = 0;
-            let lastUpdate = Date.now();
-            const batchSize = 100;
+            // Split work across workers
+            const rangeSize = Math.ceil(validCombinations / numWorkers);
             let foundMatch = false;
+            let completedWorkers = 0;
             
-            const generator = generateCombinations(knownWords, missingCount);
+            // Track each worker's progress separately
+            const workerProgress = new Map();
             
-            for await (const missingWords of generator) {
-                if (stopRequested || foundMatch) break;
-                
-                const completedPhrase = [...knownWords, ...missingWords];
-                const mnemonicString = completedPhrase.join(' ');
-                
-                // All generated combinations are valid by design (checksum is calculated)
-                const addresses = deriveAddressesMultiplePaths(mnemonicString, derivationPaths, 10);
-                if (addresses) {
-                    // Check if any address matches the known address
-                    if (knownAddress) {
-                        const matchedAddress = addresses.find(addr => 
-                            addr.address.toLowerCase() === knownAddress
-                        );
-                        
-                        if (matchedAddress) {
-                            results.push({
-                                phrase: mnemonicString,
-                                addresses: addresses,
-                                matchedAddress: matchedAddress
-                            });
-                            displayResult(results[results.length - 1], results.length);
-                            foundMatch = true;
-                            break; // Stop searching when we find the match
-                        }
-                    } else {
-                        // No known address - show all results
-                        results.push({
-                            phrase: mnemonicString,
-                            addresses: addresses
-                        });
-                        displayResult(results[results.length - 1], results.length);
-                    }
-                }
-                
-                tested++;
-                
-                // Update progress periodically
-                const now = Date.now();
-                if (now - lastUpdate > 100 || tested % batchSize === 0) {
-                    const progress = (tested / validCombinations) * 100;
-                    updateProgress(progress, tested, validCombinations);
-                    lastUpdate = now;
+            return new Promise((resolve) => {
+                // Create workers
+                for (let i = 0; i < numWorkers; i++) {
+                    const startIdx = i * rangeSize;
+                    const endIdx = Math.min((i + 1) * rangeSize, validCombinations);
                     
-                    // Yield control to browser to keep UI responsive
-                    await new Promise(resolve => setTimeout(resolve, 0));
+                    if (startIdx >= validCombinations) break;
+                    
+                    const worker = createWorker();
+                    const workerId = i;
+                    workers.push(worker);
+                    workerProgress.set(workerId, 0);
+                    
+                    worker.onmessage = function(e) {
+                        const { type, data, tested: workerTested, error } = e.data;
+                        
+                        if (type === 'progress') {
+                            // Update this worker's progress
+                            workerProgress.set(workerId, workerTested);
+                            
+                            // Sum all workers' progress
+                            let totalTested = 0;
+                            workerProgress.forEach(count => totalTested += count);
+                            
+                            const progress = (totalTested / validCombinations) * 100;
+                            updateProgress(progress, totalTested, validCombinations);
+                        } else if (type === 'match') {
+                            // Found a match! Stop all workers
+                            foundMatch = true;
+                            results.push(data);
+                            displayResult(data, results.length);
+                            
+                            // Terminate all workers
+                            workers.forEach(w => w.terminate());
+                            workers = [];
+                            
+                            resolve({ results, foundMatch: true });
+                        } else if (type === 'result') {
+                            // Found a valid result (no filter mode)
+                            results.push(data);
+                            displayResult(data, results.length);
+                        } else if (type === 'complete') {
+                            // Update this worker's final progress
+                            workerProgress.set(workerId, workerTested);
+                            completedWorkers++;
+                            
+                            // All workers completed
+                            if (completedWorkers === workers.length) {
+                                workers.forEach(w => w.terminate());
+                                workers = [];
+                                resolve({ results, foundMatch: false });
+                            }
+                        } else if (type === 'error') {
+                            console.error('Worker error:', error);
+                        }
+                    };
+                    
+                    worker.onerror = function(error) {
+                        console.error('Worker error:', error);
+                    };
+                    
+                    // Start worker
+                    worker.postMessage({
+                        knownWords,
+                        startIdx,
+                        endIdx,
+                        derivationPaths,
+                        knownAddresses
+                    });
                 }
-            }
-            
-            return { results, foundMatch };
+            });
         }
 
         function updateProgress(percentage, tested, total) {
@@ -815,9 +995,9 @@
                 progressDiv.style.display = 'block';
                 stopRequested = false;
                 
-                // Start recovery
+                // Start recovery with parallel workers
                 const startTime = Date.now();
-                const recoveryResult = await recoverSeedPhrase(knownWords);
+                const recoveryResult = await recoverSeedPhraseParallel(knownWords);
                 const endTime = Date.now();
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
                 
@@ -853,6 +1033,10 @@
             stopRequested = true;
             stopBtn.disabled = true;
             progressText.textContent = 'Stopping recovery...';
+            
+            // Terminate all workers
+            workers.forEach(w => w.terminate());
+            workers = [];
         }
 
         function clearAll() {
