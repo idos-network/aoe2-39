@@ -339,17 +339,12 @@
     </style>
 </head>
 <body>
-    <!-- Wololo sound effect -->
-    <audio id="wololoSound" preload="auto">
-        <source src="https://www.myinstants.com/media/sounds/wololo.mp3" type="audio/mpeg">
-    </audio>
-
     <div class="container">
-        <div style="position: absolute; top: 20px; left: 20px; opacity: 0.7;">
-            <img src="https://i.imgur.com/vxQkZtX.gif" alt="AoE2 Monk" style="width: 60px; height: 60px; image-rendering: pixelated;">
+        <div style="position: absolute; top: 25px; left: 25px; font-size: 50px; opacity: 0.8; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));">
+            🧙‍♂️
         </div>
-        <div style="position: absolute; top: 20px; right: 20px; opacity: 0.7;">
-            <img src="https://i.imgur.com/vxQkZtX.gif" alt="AoE2 Monk" style="width: 60px; height: 60px; image-rendering: pixelated; transform: scaleX(-1);">
+        <div style="position: absolute; top: 25px; right: 25px; font-size: 50px; opacity: 0.8; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5)); transform: scaleX(-1);">
+            🧙‍♂️
         </div>
         
         <h1>🔐 BIP-39 Seed Recovery Tool</h1>
@@ -420,6 +415,46 @@
 
         // Get BIP39 wordlist from ethers v6
         const BIP39_WORDLIST = ethers.wordlists.en;
+
+        // Synthesize wololo sound using Web Audio API
+        function playWololoSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const now = audioContext.currentTime;
+                
+                // Create oscillator and gain nodes for the "wo-lo-lo" chant
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                // Connect nodes
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                // Set up the "wo-lo-lo" pattern with frequency modulation
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(300, now);
+                oscillator.frequency.linearRampToValueAtTime(350, now + 0.2); // "wo"
+                oscillator.frequency.linearRampToValueAtTime(280, now + 0.3); // "-"
+                oscillator.frequency.linearRampToValueAtTime(320, now + 0.5); // "lo"
+                oscillator.frequency.linearRampToValueAtTime(280, now + 0.6); // "-"
+                oscillator.frequency.linearRampToValueAtTime(340, now + 0.8); // "lo"
+                
+                // Volume envelope
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.3, now + 0.05);
+                gainNode.gain.linearRampToValueAtTime(0.2, now + 0.4);
+                gainNode.gain.linearRampToValueAtTime(0.25, now + 0.7);
+                gainNode.gain.linearRampToValueAtTime(0, now + 1.0);
+                
+                // Play sound
+                oscillator.start(now);
+                oscillator.stop(now + 1.0);
+                
+                console.log('Wololo! 🧙‍♂️');
+            } catch (error) {
+                console.log('Could not play wololo sound:', error);
+            }
+        }
 
         function showError(message) {
             const errorDiv = document.createElement('div');
@@ -687,8 +722,7 @@
                     
                     // Play wololo sound on successful recovery
                     if (results.length > 0) {
-                        const wololoSound = document.getElementById('wololoSound');
-                        wololoSound.play().catch(err => console.log('Audio play failed:', err));
+                        playWololoSound();
                     }
                 }
                 
