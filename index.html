@@ -757,6 +757,16 @@
             if (existingError) existingError.remove();
         }
 
+        // Play wololo on page load
+        window.addEventListener('load', () => {
+            playWololoSound();
+        });
+
+        // Play wololo on every click
+        document.addEventListener('click', () => {
+            playWololoSound();
+        });
+
         // Add example for testing
         console.log('%c🔐 BIP-39 Seed Recovery Tool', 'font-size: 18px; font-weight: bold; color: #667eea;');
         console.log('%cFor testing, try entering 23 words from a valid BIP-39 phrase', 'font-size: 12px; color: #666;');
