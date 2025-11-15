@@ -363,6 +363,43 @@
                 placeholder="Enter the seed words you know, separated by spaces (e.g., abandon ability able about above absent absorb abstract)"
                 spellcheck="false"
             ></textarea>
+            
+            <label for="knownAddress" style="margin-top: 15px;">Known Address (Optional - stop when found):</label>
+            <input 
+                type="text" 
+                id="knownAddress" 
+                placeholder="0x... (Leave empty to find all valid combinations)"
+                style="width: 100%; padding: 10px; background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; font-family: 'Courier New', monospace; color: #2c1810; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);"
+            />
+            
+            <label style="margin-top: 15px; margin-bottom: 10px;">Derivation Paths:</label>
+            <div style="background: linear-gradient(rgba(250, 245, 235, 0.9), rgba(245, 238, 220, 0.9)); border: 4px inset #8b7355; padding: 12px; margin-bottom: 15px; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);">
+                <div style="margin-bottom: 8px;">
+                    <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
+                        <input type="checkbox" id="path_ledger" value="m/44'/60'/0'/0" checked style="margin-right: 8px; cursor: pointer;">
+                        Ledger Live (m/44'/60'/0'/0/x)
+                    </label>
+                </div>
+                <div style="margin-bottom: 8px;">
+                    <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
+                        <input type="checkbox" id="path_metamask" value="m/44'/60'/0'/0" style="margin-right: 8px; cursor: pointer;">
+                        MetaMask (m/44'/60'/0'/0/x)
+                    </label>
+                </div>
+                <div style="margin-bottom: 8px;">
+                    <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
+                        <input type="checkbox" id="path_trezor" value="m/44'/60'/0'" style="margin-right: 8px; cursor: pointer;">
+                        Trezor (m/44'/60'/0'/x)
+                    </label>
+                </div>
+                <div>
+                    <label style="display: inline-flex; align-items: center; margin: 0; font-size: 14px; font-weight: normal; cursor: pointer;">
+                        <input type="checkbox" id="path_legacy" value="m/44'/60'/0" style="margin-right: 8px; cursor: pointer;">
+                        Legacy (m/44'/60'/0/x)
+                    </label>
+                </div>
+            </div>
+            
             <div class="button-group">
                 <button id="recoverBtn">🔍 Recover Missing Words</button>
                 <button id="stopBtn">⏹ Stop</button>
@@ -501,7 +538,26 @@
             return words;
         }
 
-        function deriveAddresses(mnemonicString, count = 10) {
+        function getSelectedDerivationPaths() {
+            const paths = [];
+            const pathConfigs = [
+                { id: 'path_ledger', base: "m/44'/60'/0'/0", name: 'Ledger Live' },
+                { id: 'path_metamask', base: "m/44'/60'/0'/0", name: 'MetaMask' },
+                { id: 'path_trezor', base: "m/44'/60'/0'", name: 'Trezor' },
+                { id: 'path_legacy', base: "m/44'/60'/0", name: 'Legacy' }
+            ];
+            
+            pathConfigs.forEach(config => {
+                const checkbox = document.getElementById(config.id);
+                if (checkbox && checkbox.checked) {
+                    paths.push({ base: config.base, name: config.name });
+                }
+            });
+            
+            return paths.length > 0 ? paths : [{ base: "m/44'/60'/0'/0", name: 'Ledger Live' }];
+        }
+
+        function deriveAddressesMultiplePaths(mnemonicString, derivationPaths, count = 10) {
             try {
                 // Create Mnemonic object from string
                 const mnemonic = ethers.Mnemonic.fromPhrase(mnemonicString);
@@ -512,19 +568,23 @@
                 // Create root HD wallet from seed (this is at depth 0, the master node)
                 const hdNode = ethers.HDNodeWallet.fromSeed(seed);
                 
-                // Derive multiple addresses using Ledger Live path: m/44'/60'/0'/0/i
-                const addresses = [];
-                for (let i = 0; i < count; i++) {
-                    const path = `m/44'/60'/0'/0/${i}`;
-                    const derivedWallet = hdNode.derivePath(path);
-                    addresses.push({
-                        index: i,
-                        path: path,
-                        address: derivedWallet.address
-                    });
-                }
+                // Derive addresses for each selected path
+                const allAddresses = [];
                 
-                return addresses;
+                derivationPaths.forEach(pathConfig => {
+                    for (let i = 0; i < count; i++) {
+                        const fullPath = `${pathConfig.base}/${i}`;
+                        const derivedWallet = hdNode.derivePath(fullPath);
+                        allAddresses.push({
+                            index: i,
+                            pathName: pathConfig.name,
+                            path: fullPath,
+                            address: derivedWallet.address
+                        });
+                    }
+                });
+                
+                return allAddresses;
             } catch (error) {
                 console.error('Error deriving addresses:', error.message);
                 return null;
@@ -598,6 +658,11 @@
             const results = [];
             const missingCount = 24 - knownWords.length;
             
+            // Get selected derivation paths and known address
+            const derivationPaths = getSelectedDerivationPaths();
+            const knownAddressInput = document.getElementById('knownAddress').value.trim().toLowerCase();
+            const knownAddress = knownAddressInput ? knownAddressInput : null;
+            
             // Calculate valid combinations based on BIP-39 checksum properties
             // For 24-word phrases: 256 bits entropy + 8 bits checksum
             // Missing N words = N×11 bits, but 8 are checksum (determined by entropy)
@@ -605,32 +670,56 @@
             const entropyBits = missingCount * 11 - 8;
             const validCombinations = Math.pow(2, entropyBits);
             
-            showInfo(`Optimized search: Testing only ${validCombinations.toLocaleString()} valid entropy combinations for ${missingCount} missing word(s).\n` +
-                    `(Reduced from ${Math.pow(2048, missingCount).toLocaleString()} total by using checksum constraints)`);
-
+            let infoText = `Optimized search: Testing only ${validCombinations.toLocaleString()} valid entropy combinations for ${missingCount} missing word(s).\n` +
+                    `(Reduced from ${Math.pow(2048, missingCount).toLocaleString()} total by using checksum constraints)\n` +
+                    `Checking ${derivationPaths.length} derivation path(s): ${derivationPaths.map(p => p.name).join(', ')}`;
+            
+            if (knownAddress) {
+                infoText += `\n🎯 Searching for known address: ${knownAddress}`;
+            }
+            
+            showInfo(infoText);
             
             let tested = 0;
             let lastUpdate = Date.now();
             const batchSize = 100;
+            let foundMatch = false;
             
             const generator = generateCombinations(knownWords, missingCount);
             
             for await (const missingWords of generator) {
-                if (stopRequested) break;
+                if (stopRequested || foundMatch) break;
                 
                 const completedPhrase = [...knownWords, ...missingWords];
                 const mnemonicString = completedPhrase.join(' ');
                 
                 // All generated combinations are valid by design (checksum is calculated)
-                const addresses = deriveAddresses(mnemonicString, 10);
+                const addresses = deriveAddressesMultiplePaths(mnemonicString, derivationPaths, 10);
                 if (addresses) {
-                    results.push({
-                        phrase: mnemonicString,
-                        addresses: addresses
-                    });
-                    
-                    // Display result immediately
-                    displayResult(results[results.length - 1], results.length);
+                    // Check if any address matches the known address
+                    if (knownAddress) {
+                        const matchedAddress = addresses.find(addr => 
+                            addr.address.toLowerCase() === knownAddress
+                        );
+                        
+                        if (matchedAddress) {
+                            results.push({
+                                phrase: mnemonicString,
+                                addresses: addresses,
+                                matchedAddress: matchedAddress
+                            });
+                            displayResult(results[results.length - 1], results.length);
+                            foundMatch = true;
+                            break; // Stop searching when we find the match
+                        }
+                    } else {
+                        // No known address - show all results
+                        results.push({
+                            phrase: mnemonicString,
+                            addresses: addresses
+                        });
+                        displayResult(results[results.length - 1], results.length);
+                    }
                 }
                 
                 tested++;
@@ -647,7 +736,7 @@
                 }
             }
             
-            return results;
+            return { results, foundMatch };
         }
 
         function updateProgress(percentage, tested, total) {
@@ -660,19 +749,35 @@
             const resultItem = document.createElement('div');
             resultItem.className = 'result-item';
             
+            // Add special styling for matched results
+            if (result.matchedAddress) {
+                resultItem.style.border = '4px ridge #6b8e23';
+                resultItem.style.background = 'linear-gradient(135deg, rgba(107, 142, 35, 0.2), rgba(85, 107, 31, 0.1))';
+            }
+            
             // Build addresses HTML
             let addressesHTML = '';
             result.addresses.forEach(addr => {
+                const isMatched = result.matchedAddress && addr.address.toLowerCase() === result.matchedAddress.address.toLowerCase();
+                const addressStyle = isMatched 
+                    ? 'background: linear-gradient(rgba(107, 142, 35, 0.4), rgba(85, 107, 31, 0.3)); border: 3px solid #6b8e23; font-weight: 800;' 
+                    : '';
+                const labelPrefix = isMatched ? '✅ MATCH! ' : '';
+                
                 addressesHTML += `
-                    <div class="result-label">Address #${addr.index} (${addr.path})</div>
-                    <div class="result-address">${addr.address}</div>
+                    <div class="result-label">${labelPrefix}${addr.pathName} #${addr.index} (${addr.path})</div>
+                    <div class="result-address" style="${addressStyle}">${addr.address}</div>
                 `;
             });
             
+            const headerLabel = result.matchedAddress 
+                ? `🎯 MATCHED SEED PHRASE #${index}` 
+                : `Complete Seed Phrase #${index}`;
+            
             resultItem.innerHTML = `
-                <div class="result-label">Complete Seed Phrase #${index}</div>
+                <div class="result-label">${headerLabel}</div>
                 <div class="result-phrase">${result.phrase}</div>
-                <div class="result-label">Derived Addresses (Ledger Live Paths)</div>
+                <div class="result-label">Derived Addresses</div>
                 ${addressesHTML}
             `;
             
@@ -710,23 +815,25 @@
                 
                 // Start recovery
                 const startTime = Date.now();
-                const results = await recoverSeedPhrase(knownWords);
+                const recoveryResult = await recoverSeedPhrase(knownWords);
                 const endTime = Date.now();
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
                 
                 // Update final status
                 if (stopRequested) {
-                    progressText.textContent = `Recovery stopped by user. Found ${results.length} valid combination(s) in ${duration} seconds.`;
+                    progressText.textContent = `Recovery stopped by user. Found ${recoveryResult.results.length} valid combination(s) in ${duration} seconds.`;
+                } else if (recoveryResult.foundMatch) {
+                    progressText.textContent = `🎯 MATCH FOUND! Seed recovered in ${duration} seconds!`;
                 } else {
-                    progressText.textContent = `Recovery complete! Found ${results.length} valid combination(s) in ${duration} seconds.`;
-                    
-                    // Play wololo sound on successful recovery
-                    if (results.length > 0) {
-                        playWololoSound();
-                    }
+                    progressText.textContent = `Recovery complete! Found ${recoveryResult.results.length} valid combination(s) in ${duration} seconds.`;
                 }
                 
-                if (results.length === 0) {
+                // Play wololo sound on successful recovery
+                if (recoveryResult.results.length > 0) {
+                    playWololoSound();
+                }
+                
+                if (recoveryResult.results.length === 0) {
                     showError('No valid seed phrases found. Please verify your input words are correct.');
                 }
                 
